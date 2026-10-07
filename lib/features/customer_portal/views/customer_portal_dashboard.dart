@@ -70,7 +70,7 @@ class CustomerPortalDashboard extends ConsumerWidget {
       body: RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(customerSummaryProvider(customerId));
-          ref.read(jobProvider.notifier).fetchJobs(customerId: customerId);
+          ref.invalidate(customerJobsProvider(customerId));
         },
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16.0),
@@ -82,7 +82,7 @@ class CustomerPortalDashboard extends ConsumerWidget {
                 loading: () => const LoadingIndicator(message: 'Loading portal data...'),
                 error: (err, _) => Text('Error: $err'),
                 data: (summary) {
-                  final outstanding = summary['outstanding'] as double;
+                  final outstanding = (summary['outstanding'] as num?)?.toDouble() ?? 0.0;
                   return Card(
                     color: AppColors.primary,
                     child: Padding(
