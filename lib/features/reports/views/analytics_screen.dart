@@ -12,171 +12,189 @@ class AnalyticsScreen extends ConsumerWidget {
     final metricsAsync = ref.watch(adminDashboardMetricsProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Analytics & Visual Charts'),
+      appBar: AppBar(title: const Text('Analytics & Visual Charts')),
+      body: metricsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (err, _) => Center(child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Text('Unable to load analytics: $err'),
+        )),
+        data: (m) => _AnalyticsBody(metrics: m),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Weekly Factory Output & Production',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
+    );
+  }
+}
 
-            // Bar Chart Container
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    SizedBox(
-                      height: 200,
-                      child: BarChart(
-                        BarChartData(
-                          alignment: BarChartAlignment.spaceAround,
-                          maxY: 20,
-                          barTouchData: BarTouchData(enabled: true),
-                          titlesData: FlTitlesData(
-                            show: true,
-                            bottomTitles: AxisTitles(
-                              sideTitles: SideTitles(
-                                showTitles: true,
-                                getTitlesWidget: (value, meta) {
-                                  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-                                  if (value.toInt() >= 0 && value.toInt() < days.length) {
-                                    return Text(days[value.toInt()], style: const TextStyle(fontSize: 11));
-                                  }
-                                  return const Text('');
-                                },
-                              ),
-                            ),
-                            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                          ),
-                          borderData: FlBorderData(show: false),
-                          barGroups: [
-                            _makeBarGroup(0, 12, AppColors.received),
-                            _makeBarGroup(1, 15, AppColors.production),
-                            _makeBarGroup(2, 10, AppColors.coldChamber),
-                            _makeBarGroup(3, 14, AppColors.qc),
-                            _makeBarGroup(4, 18, AppColors.ready),
-                            _makeBarGroup(5, 16, AppColors.delivered),
-                            _makeBarGroup(6, 8, AppColors.secondary),
-                          ],
+class _AnalyticsBody extends StatelessWidget {
+  final Map<String, dynamic> metrics;
+  const _AnalyticsBody({required this.metrics});
+
+  @override
+  Widget build(BuildContext context) {
+    final received = (metrics['tyresReceivedToday'] as num?)?.toDouble() ?? 0;
+    final produced = (metrics['tyresProductionToday'] as num?)?.toDouble() ?? 0;
+    final chamber = (metrics['coldChamberCount'] as num?)?.toDouble() ?? 0;
+    final qc = (metrics['qcPendingCount'] as num?)?.toDouble() ?? 0;
+    final ready = (metrics['readyTyresCount'] as num?)?.toDouble() ?? 0;
+    final delivered = (metrics['deliveredTodayCount'] as num?)?.toDouble() ?? 0;
+
+    final values = [received, produced, chamber, qc, ready, delivered];
+    final maxValue = values.fold<double>(1, (max, value) => value > max ? value : max);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Today\'s Factory Activity',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: SizedBox(
+                height: 220,
+                child: BarChart(
+                  BarChartData(
+                    maxY: maxValue + (maxValue * 0.2),
+                    alignment: BarChartAlignment.spaceAround,
+                    gridData: const FlGridData(show: true),
+                    titlesData: FlTitlesData(
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, meta) {
+                            const labels = ['Recv', 'Prod', 'Chm', 'QC', 'Ready', 'Del'];
+                            final i = value.toInt();
+                            return i >= 0 && i < labels.length
+                                ? Text(labels[i], style: const TextStyle(fontSize: 10))
+                                : const SizedBox.shrink();
+                          },
                         ),
                       ),
+                      leftTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: true, reservedSize: 34),
+                      ),
+                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                     ),
-                  ],
+                    borderData: FlBorderData(show: false),
+                    barGroups: [
+                      _bar(0, received, AppColors.received),
+                      _bar(1, produced, AppColors.production),
+                      _bar(2, chamber, AppColors.coldChamber),
+                      _bar(3, qc, AppColors.qc),
+                      _bar(4, ready, AppColors.ready),
+                      _bar(5, delivered, AppColors.delivered),
+                    ],
+                  ),
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-
-            const Text(
-              'Tyre Lifecycle Breakdown',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-
-            // Pie Chart Container
-            metricsAsync.when(
-              loading: () => const CircularProgressIndicator(),
-              error: (err, _) => Text('Error: $err'),
-              data: (m) {
-                final received = (m['tyresReceivedToday'] as num).toDouble() + 5;
-                final prod = (m['tyresProductionToday'] as num).toDouble() + 8;
-                final chamber = (m['coldChamberCount'] as num).toDouble() + 4;
-                final ready = (m['readyTyresCount'] as num).toDouble() + 6;
-
-                return Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      children: [
-                        SizedBox(
-                          height: 180,
-                          child: PieChart(
-                            PieChartData(
-                              sectionsSpace: 2,
-                              centerSpaceRadius: 40,
-                              sections: [
-                                PieChartSectionData(
-                                  color: AppColors.received,
-                                  value: received,
-                                  title: 'Rec',
-                                  radius: 40,
-                                  titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                                ),
-                                PieChartSectionData(
-                                  color: AppColors.production,
-                                  value: prod,
-                                  title: 'Prod',
-                                  radius: 40,
-                                  titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                                ),
-                                PieChartSectionData(
-                                  color: AppColors.coldChamber,
-                                  value: chamber,
-                                  title: 'Chamber',
-                                  radius: 40,
-                                  titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                                ),
-                                PieChartSectionData(
-                                  color: AppColors.ready,
-                                  value: ready,
-                                  title: 'Ready',
-                                  radius: 40,
-                                  titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 12,
-                          children: const [
-                            _LegendItem('Received', AppColors.received),
-                            _LegendItem('Production', AppColors.production),
-                            _LegendItem('Cold Chamber', AppColors.coldChamber),
-                            _LegendItem('Ready', AppColors.ready),
-                          ],
-                        ),
-                      ],
+          ),
+          const SizedBox(height: 20),
+          const Text('Current Tyre Lifecycle',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  SizedBox(
+                    height: 210,
+                    child: PieChart(
+                      PieChartData(
+                        sectionsSpace: 2,
+                        centerSpaceRadius: 42,
+                        sections: _pieSections(received, produced, chamber, qc, ready),
+                      ),
                     ),
                   ),
-                );
-              },
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    children: const [
+                      _LegendItem('Received', AppColors.received),
+                      _LegendItem('Production', AppColors.production),
+                      _LegendItem('Cold Chamber', AppColors.coldChamber),
+                      _LegendItem('QC', AppColors.qc),
+                      _LegendItem('Ready', AppColors.ready),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  BarChartGroupData _makeBarGroup(int x, double y, Color color) {
+  static BarChartGroupData _bar(int x, double y, Color color) {
     return BarChartGroupData(
       x: x,
       barRods: [
         BarChartRodData(
           toY: y,
           color: color,
-          width: 16,
+          width: 18,
           borderRadius: BorderRadius.circular(4),
         ),
       ],
     );
+  }
+
+  static List<PieChartSectionData> _pieSections(
+    double received,
+    double produced,
+    double chamber,
+    double qc,
+    double ready,
+  ) {
+    final data = [
+      ('Rec', received, AppColors.received),
+      ('Prod', produced, AppColors.production),
+      ('Chm', chamber, AppColors.coldChamber),
+      ('QC', qc, AppColors.qc),
+      ('Ready', ready, AppColors.ready),
+    ];
+
+    final total = data.fold<double>(0, (sum, item) => sum + item.$2);
+    if (total <= 0) {
+      return [
+        PieChartSectionData(
+          value: 1,
+          title: 'No data',
+          radius: 42,
+          color: AppColors.textSecondaryLight,
+        ),
+      ];
+    }
+
+    return data
+        .where((item) => item.$2 > 0)
+        .map(
+          (item) => PieChartSectionData(
+            value: item.$2,
+            title: item.$1,
+            radius: 42,
+            color: item.$3,
+            titleStyle: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 11,
+            ),
+          ),
+        )
+        .toList();
   }
 }
 
 class _LegendItem extends StatelessWidget {
   final String label;
   final Color color;
-
   const _LegendItem(this.label, this.color);
 
   @override
