@@ -1,112 +1,92 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/services/supabase_service.dart';
 
-final adminDashboardMetricsProvider = FutureProvider<Map<String, dynamic>>((ref) async {
+final adminDashboardMetricsProvider =
+    FutureProvider<Map<String, dynamic>>((ref) async {
   final client = SupabaseService.client;
-  final todayStr = DateTime.now().toIso8601String().split('T').first;
+  final now = DateTime.now();
+  final todayStr = now.toIso8601String().split('T').first;
+  final tomorrowStr = DateTime(now.year, now.month, now.day + 1)
+      .toIso8601String()
+      .split('T')
+      .first;
 
-  // 1. Tyres received today
-  final receivedTodayRes = await client
+  int sumInt(Iterable<dynamic> rows, String key) =>
+      rows.fold<int>(0, (sum, row) => sum + ((row[key] as num?)?.toInt() ?? 0));
+
+  double sumDouble(Iterable<dynamic> rows, String key) => rows.fold<double>(
+        0,
+        (sum, row) => sum + ((row[key] as num?)?.toDouble() ?? 0),
+      );
+
+  final received = await client
       .from('jobs')
       .select('quantity')
       .eq('received_date', todayStr);
 
-  int tyresReceivedToday = 0;
-  for (final row in receivedTodayRes) {
-    tyresReceivedToday += (row['quantity'] as num?)?.toInt() ?? 1;
-  }
-
-  // 2. Production today count
-  final prodTodayRes = await client
+  final produced = await client
       .from('production_entries')
       .select('quantity')
-      .gte('created_at', '${todayStr}T00:00:00');
+      .gte('created_at', '${todayStr}T00:00:00')
+      .lt('created_at', '${tomorrowStr}T00:00:00');
 
-  int tyresProductionToday = 0;
-  for (final row in prodTodayRes) {
-    tyresProductionToday += (row['quantity'] as num?)?.toInt() ?? 1;
-  }
+  final jobs = await client.from('jobs').select('status, quantity');
 
-  // 3. Counts by status
-  final allJobsRes = await client.from('jobs').select('status, quantity');
-
-  int coldChamberCount = 0;
-  int qcPendingCount = 0;
-  int readyTyresCount = 0;
-  int totalActiveJobs = 0;
-
-  for (final j in allJobsRes) {
-    final status = j['status'] as String? ?? '';
-    final qty = (j['quantity'] as num?)?.toInt() ?? 1;
-
-    if (status == 'Cold Chamber') coldChamberCount += qty;
-    if (status == 'QC') qcPendingCount += qty;
-    if (status == 'Ready') readyTyresCount += qty;
-    if (status != 'Delivered' && status != 'Scrap') totalActiveJobs += qty;
-  }
-
-  // 4. Delivered today
-  final deliveredTodayRes = await client
+  final deliveries = await client
       .from('deliveries')
       .select('delivered_quantity')
       .eq('delivery_date', todayStr);
 
-  int deliveredTodayCount = 0;
-  for (final row in deliveredTodayRes) {
-    deliveredTodayCount += (row['delivered_quantity'] as num?)?.toInt() ?? 0;
-  }
-
-  // 5. Today's payment collection
-  final paymentsTodayRes = await client
+  final paymentsToday = await client
       .from('payments')
       .select('amount')
       .eq('payment_date', todayStr);
 
-  double todayCollection = 0.0;
-  for (final row in paymentsTodayRes) {
-    todayCollection += (row['amount'] as num?)?.toDouble() ?? 0.0;
+  final allInvoices = await client.from('invoices').select('grand_total');
+  final allPayments = await client.from('payments').select('amount');
+  final customers = await client.from('customers').select('opening_balance');
+  final stock =
+      await client.from('stock_items').select('current_stock, minimum_stock');
+
+  int cold = 0, qc = 0, ready = 0, active = 0;
+
+  for (final row in jobs) {
+    final qty = (row['quantity'] as num?)?.toInt() ?? 0;
+    switch (row['status']) {
+      case 'Cold Chamber':
+        cold += qty;
+        break;
+      case 'QC':
+        qc += qty;
+        break;
+      case 'Ready':
+        ready += qty;
+        break;
+    }
+
+    if (row['status'] != 'Delivered' && row['status'] != 'Scrap') {
+      active += qty;
+    }
   }
 
-  // 6. Total outstanding amount
-  final invoicesRes = await client.from('invoices').select('grand_total');
-  double totalInvoiced = 0.0;
-  for (final row in invoicesRes) {
-    totalInvoiced += (row['grand_total'] as num?)?.toDouble() ?? 0.0;
-  }
-
-  final allPaymentsRes = await client.from('payments').select('amount');
-  double totalPaid = 0.0;
-  for (final row in allPaymentsRes) {
-    totalPaid += (row['amount'] as num?)?.toDouble() ?? 0.0;
-  }
-
-  final custRes = await client.from('customers').select('opening_balance');
-  double totalOpeningBal = 0.0;
-  for (final row in custRes) {
-    totalOpeningBal += (row['opening_balance'] as num?)?.toDouble() ?? 0.0;
-  }
-
-  double totalOutstanding = (totalInvoiced + totalOpeningBal) - totalPaid;
-
-  // 7. Low stock items count
-  final stockRes = await client.from('stock_items').select('current_stock, minimum_stock');
-  int lowStockCount = 0;
-  for (final row in stockRes) {
-    final cur = (row['current_stock'] as num?)?.toDouble() ?? 0.0;
-    final min = (row['minimum_stock'] as num?)?.toDouble() ?? 0.0;
-    if (cur <= min) lowStockCount++;
-  }
+  final totalInvoiced = sumDouble(allInvoices, 'grand_total');
+  final totalPaid = sumDouble(allPayments, 'amount');
+  final totalOpening = sumDouble(customers, 'opening_balance');
 
   return {
-    'tyresReceivedToday': tyresReceivedToday,
-    'tyresProductionToday': tyresProductionToday,
-    'coldChamberCount': coldChamberCount,
-    'qcPendingCount': qcPendingCount,
-    'readyTyresCount': readyTyresCount,
-    'deliveredTodayCount': deliveredTodayCount,
-    'todayCollection': todayCollection,
-    'totalOutstanding': totalOutstanding,
-    'lowStockCount': lowStockCount,
-    'totalActiveJobs': totalActiveJobs,
+    'tyresReceivedToday': sumInt(received, 'quantity'),
+    'tyresProductionToday': sumInt(produced, 'quantity'),
+    'coldChamberCount': cold,
+    'qcPendingCount': qc,
+    'readyTyresCount': ready,
+    'deliveredTodayCount': sumInt(deliveries, 'delivered_quantity'),
+    'todayCollection': sumDouble(paymentsToday, 'amount'),
+    'totalOutstanding': totalInvoiced + totalOpening - totalPaid,
+    'lowStockCount': stock.where((row) {
+      final current = (row['current_stock'] as num?)?.toDouble() ?? 0;
+      final minimum = (row['minimum_stock'] as num?)?.toDouble() ?? 0;
+      return current <= minimum;
+    }).length,
+    'totalActiveJobs': active,
   };
 });
