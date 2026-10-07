@@ -221,3 +221,17 @@ final jobHistoryProvider =
       .map((json) => JobStatusHistory.fromJson(json))
       .toList();
 });
+
+
+final customerJobsProvider =
+    FutureProvider.family<List<Job>, String>((ref, customerId) async {
+  final response = await SupabaseService.client
+      .from('jobs')
+      .select('*, customers(*)')
+      .eq('customer_id', customerId)
+      .order('created_at', ascending: false);
+
+  return (response as List)
+      .map((json) => Job.fromJson(json))
+      .toList();
+});
