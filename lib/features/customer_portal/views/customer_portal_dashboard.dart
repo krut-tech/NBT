@@ -50,7 +50,7 @@ class CustomerPortalDashboard extends ConsumerWidget {
     }
 
     final summaryAsync = ref.watch(customerSummaryProvider(customerId));
-    final jobsAsync = ref.watch(jobProvider);
+    final jobsAsync = ref.watch(customerJobsProvider(customerId));
 
     return Scaffold(
       appBar: AppBar(
@@ -164,10 +164,7 @@ class CustomerPortalDashboard extends ConsumerWidget {
                 loading: () => const LoadingIndicator(message: 'Loading tyres...'),
                 error: (err, _) => Text('Error: $err'),
                 data: (jobs) {
-                  final customerJobs =
-                      jobs.where((j) => j.customerId == customerId).toList();
-
-                  if (customerJobs.isEmpty) {
+                  if (jobs.isEmpty) {
                     return Card(
                       child: Padding(
                         padding: const EdgeInsets.all(20.0),
@@ -185,9 +182,9 @@ class CustomerPortalDashboard extends ConsumerWidget {
                   return ListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
-                    itemCount: customerJobs.length,
+                    itemCount: jobs.length,
                     itemBuilder: (context, index) {
-                      final job = customerJobs[index];
+                      final job = jobs[index];
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
                         child: ListTile(
