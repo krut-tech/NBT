@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_constants.dart';
 import '../../../core/widgets/custom_text_field.dart';
-import '../../../core/widgets/searchable_dropdown.dart';
 import '../providers/auth_provider.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
@@ -21,7 +19,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  String _selectedRole = AppConstants.roleCustomer;
   bool _isLoading = false;
   bool _obscurePassword = true;
   String? _errorMessage;
@@ -48,7 +45,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             email: _emailController.text.trim(),
             password: _passwordController.text.trim(),
             fullName: _fullNameController.text.trim(),
-            role: _selectedRole,
+            role: 'customer',
             phone: _phoneController.text.trim().isNotEmpty
                 ? _phoneController.text.trim()
                 : null,
@@ -64,14 +61,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         context.pop();
       }
     } catch (e) {
-      setState(() {
-        _errorMessage = e.toString().replaceAll('Exception: ', '');
-      });
-    } finally {
       if (mounted) {
         setState(() {
-          _isLoading = false;
+          _errorMessage = e.toString().replaceAll('Exception: ', '');
         });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
       }
     }
   }
@@ -79,9 +76,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Register Account'),
-      ),
+      appBar: AppBar(title: const Text('Register Customer Account')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
@@ -107,7 +102,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   ),
                   const SizedBox(height: 16),
                 ],
-
                 CustomTextField(
                   label: 'Full Name',
                   hint: 'e.g. Rajesh Patel',
@@ -116,7 +110,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   prefixIcon: const Icon(Icons.person_outline),
                 ),
                 const SizedBox(height: 16),
-
                 CustomTextField(
                   label: 'Email Address',
                   hint: 'e.g. rajesh@gmail.com',
@@ -126,7 +119,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   prefixIcon: const Icon(Icons.email_outlined),
                 ),
                 const SizedBox(height: 16),
-
                 CustomTextField(
                   label: 'Phone Number',
                   hint: 'e.g. 9876543210',
@@ -135,22 +127,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   prefixIcon: const Icon(Icons.phone_outlined),
                 ),
                 const SizedBox(height: 16),
-
-                SearchableDropdown<String>(
-                  label: 'Account Role',
-                  value: _selectedRole,
-                  items: AppConstants.allRoles,
-                  itemAsString: (role) => AppConstants.getRoleDisplayName(role),
-                  onChanged: (val) {
-                    if (val != null) {
-                      setState(() {
-                        _selectedRole = val;
-                      });
-                    }
-                  },
+                const Text(
+                  'New registrations are created as Customer accounts. An administrator can assign staff roles later.',
+                  style: TextStyle(fontSize: 12),
                 ),
                 const SizedBox(height: 16),
-
                 CustomTextField(
                   label: 'Password',
                   hint: 'At least 6 characters',
@@ -165,14 +146,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           : Icons.visibility,
                     ),
                     onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
+                      setState(() => _obscurePassword = !_obscurePassword);
                     },
                   ),
                 ),
                 const SizedBox(height: 24),
-
                 ElevatedButton(
                   onPressed: _isLoading ? null : _handleRegister,
                   child: _isLoading
