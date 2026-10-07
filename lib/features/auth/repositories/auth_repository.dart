@@ -32,7 +32,7 @@ class AuthRepository {
     required String email,
     required String password,
   }) async {
-    return await _client.auth.signInWithPassword(
+    return _client.auth.signInWithPassword(
       email: email,
       password: password,
     );
@@ -46,28 +46,18 @@ class AuthRepository {
     String? phone,
     String? customerId,
   }) async {
-    final response = await _client.auth.signUp(
+    // Profile creation is handled by the database trigger. This avoids
+    // failing registration when email confirmation is enabled and no session
+    // is available yet. New self-registered accounts are always customers;
+    // staff roles must be assigned by an administrator.
+    return _client.auth.signUp(
       email: email,
       password: password,
       data: {
         'full_name': fullName,
-        'role': role,
+        'phone': phone,
       },
     );
-
-    if (response.user != null) {
-      // Ensure profile row exists in 'profiles' table
-      await _client.from('profiles').upsert({
-        'id': response.user!.id,
-        'full_name': fullName,
-        'phone': phone,
-        'role': role,
-        'customer_id': customerId,
-        'is_active': true,
-      });
-    }
-
-    return response;
   }
 
   Future<void> signOut() async {
