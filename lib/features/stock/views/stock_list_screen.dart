@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/utils/error_message.dart';
 import '../../../core/widgets/custom_text_field.dart';
 import '../../../core/widgets/empty_state_widget.dart';
 import '../../../core/widgets/loading_indicator.dart';
@@ -289,7 +290,21 @@ class _StockListScreenState extends ConsumerState<StockListScreen> {
                   onPressed: () async {
                     final qty =
                         double.tryParse(qtyController.text.trim()) ?? 0.0;
-                    if (qty <= 0) return;
+                    if (qty <= 0) {
+                      ScaffoldMessenger.of(sheetContext).showSnackBar(
+                        const SnackBar(
+                            content: Text('Enter a quantity greater than 0')),
+                      );
+                      return;
+                    }
+                    if (!isStockIn && qty > item.currentStock) {
+                      ScaffoldMessenger.of(sheetContext).showSnackBar(
+                        SnackBar(
+                            content: Text(
+                                'Only ${item.currentStock} ${item.unit} in stock')),
+                      );
+                      return;
+                    }
 
                     Navigator.pop(sheetContext);
                     try {
@@ -319,7 +334,7 @@ class _StockListScreenState extends ConsumerState<StockListScreen> {
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('Failed: $e'),
+                            content: Text('Failed: ${friendlyError(e)}'),
                             backgroundColor: AppColors.rejected,
                           ),
                         );

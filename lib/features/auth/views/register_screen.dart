@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_constants.dart';
+import '../../../core/utils/error_message.dart';
 import '../../../core/widgets/custom_text_field.dart';
-import '../../../core/widgets/searchable_dropdown.dart';
 import '../providers/auth_provider.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
@@ -21,7 +20,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  String _selectedRole = AppConstants.roleCustomer;
   bool _isLoading = false;
   bool _obscurePassword = true;
   String? _errorMessage;
@@ -44,29 +42,37 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     });
 
     try {
-      await ref.read(authProvider.notifier).signUp(
+      final signedIn = await ref.read(authProvider.notifier).signUp(
             email: _emailController.text.trim(),
-            password: _passwordController.text.trim(),
+            password: _passwordController.text,
             fullName: _fullNameController.text.trim(),
-            role: _selectedRole,
             phone: _phoneController.text.trim().isNotEmpty
                 ? _phoneController.text.trim()
                 : null,
           );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Account created successfully! Please sign in.'),
-            backgroundColor: AppColors.ready,
-          ),
-        );
-        context.pop();
+      if (!mounted) return;
+
+      if (signedIn) {
+        // Signed in: the router takes the user to the dashboard on its own.
+        return;
       }
+
+      // E-mail confirmation is enabled: there is no session until the link is opened.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Account created! Please confirm your e-mail, then sign in.'),
+          backgroundColor: AppColors.ready,
+        ),
+      );
+      context.pop();
     } catch (e) {
-      setState(() {
-        _errorMessage = e.toString().replaceAll('Exception: ', '');
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = friendlyError(e);
+        });
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -136,18 +142,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 ),
                 const SizedBox(height: 16),
 
-                SearchableDropdown<String>(
-                  label: 'Account Role',
-                  value: _selectedRole,
-                  items: AppConstants.allRoles,
-                  itemAsString: (role) => AppConstants.getRoleDisplayName(role),
-                  onChanged: (val) {
-                    if (val != null) {
-                      setState(() {
-                        _selectedRole = val;
-                      });
-                    }
-                  },
+                const Text(
+                  'Accounts created here are customer accounts. Staff access is '
+                  'granted by an administrator.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondaryLight,
+                  ),
                 ),
                 const SizedBox(height: 16),
 
@@ -157,6 +158,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   controller: _passwordController,
                   obscureText: _obscurePassword,
                   isRequired: true,
+                  validator: (v) => (v == null || v.length < 6)
+                      ? 'Password must be at least 6 characters'
+                      : null,
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
                     icon: Icon(

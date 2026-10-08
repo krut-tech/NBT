@@ -1,4 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Flutter only adds INTERNET to debug/profile builds. Without it a release APK
+         cannot reach Supabase at all. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- QR scanner and tyre photos. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
         android:label="new_bharat_tyre_remould"
         android:name="${applicationName}"

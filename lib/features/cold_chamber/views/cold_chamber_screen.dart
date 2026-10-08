@@ -22,6 +22,8 @@ class ColdChamberScreen extends ConsumerWidget {
     final tempController = TextEditingController(text: '115'); // 115°C default
     final notesController = TextEditingController();
 
+    // NOTE: inside the sheet use `sheetRef` / `sheetContext`; the outer `ref` and
+    // `context` (this screen) are used after the sheet is closed.
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -30,176 +32,204 @@ class ColdChamberScreen extends ConsumerWidget {
       ),
       builder: (sheetContext) {
         return Consumer(
-          builder: (context, ref, _) {
-            final jobsAsync = ref.watch(jobProvider);
-            final chambers = ref.watch(coldChambersProvider);
-            final operators = ref.watch(operatorsProvider);
+          builder: (_, sheetRef, __) {
+            final jobsAsync =
+                sheetRef.watch(jobsByStatusProvider('Cold Chamber,Production'));
+            final chambers = sheetRef.watch(coldChambersProvider);
+            final operators = sheetRef.watch(operatorsProvider);
 
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 20,
-                bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            return StatefulBuilder(
+              builder: (_, setSheetState) {
+                return Padding(
+                  padding: EdgeInsets.only(
+                    left: 20,
+                    right: 20,
+                    top: 20,
+                    bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20,
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Text(
-                          'Cold Chamber Process Entry',
-                          style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Cold Chamber Process Entry',
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => Navigator.pop(sheetContext),
+                            ),
+                          ],
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.close),
-                          onPressed: () => Navigator.pop(sheetContext),
+                        const Divider(),
+                        const SizedBox(height: 12),
+
+                        // Job selector
+                        jobsAsync.when(
+                          loading: () => const LinearProgressIndicator(),
+                          error: (e, _) => Text('Error loading jobs: $e'),
+                          data: (eligibleJobs) {
+                            return SearchableDropdown<Job>(
+                              label: 'Select Job in Chamber Queue',
+                              value: selectedJob,
+                              items: eligibleJobs,
+                              isRequired: true,
+                              itemAsString: (j) =>
+                                  '#${j.jobNumber} - ${j.customer?.name ?? 'Unknown'} (${j.quantity} Tyres)',
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setSheetState(() {
+                                    selectedJob = val;
+                                    quantityController.text =
+                                        val.quantity.toString();
+                                  });
+                                }
+                              },
+                            );
+                          },
                         ),
-                      ],
-                    ),
-                    const Divider(),
-                    const SizedBox(height: 12),
+                        const SizedBox(height: 12),
 
-                    // Job selector
-                    jobsAsync.when(
-                      loading: () => const LinearProgressIndicator(),
-                      error: (e, _) => Text('Error loading jobs: $e'),
-                      data: (jobs) {
-                        final eligibleJobs = jobs.where((j) =>
-                            j.status == 'Cold Chamber' ||
-                            j.status == 'Production').toList();
-
-                        return SearchableDropdown<Job>(
-                          label: 'Select Job in Chamber Queue',
-                          value: selectedJob,
-                          items: eligibleJobs,
+                        SearchableDropdown<String>(
+                          label: 'Cold Chamber Unit',
+                          value: selectedChamber,
+                          items: chambers,
                           isRequired: true,
-                          itemAsString: (j) =>
-                              '#${j.jobNumber} - ${j.customer?.name} (${j.quantity} Tyres)',
-                          onChanged: (val) {
-                            if (val != null) {
-                              selectedJob = val;
-                              quantityController.text = val.quantity.toString();
+                          itemAsString: (c) => c,
+                          onChanged: (val) =>
+                              setSheetState(() => selectedChamber = val),
+                        ),
+                        const SizedBox(height: 12),
+
+                        SearchableDropdown<String>(
+                          label: 'Operator Name',
+                          value: selectedOperator,
+                          items: operators,
+                          isRequired: true,
+                          itemAsString: (op) => op,
+                          onChanged: (val) =>
+                              setSheetState(() => selectedOperator = val),
+                        ),
+                        const SizedBox(height: 12),
+
+                        Row(
+                          children: [
+                            Expanded(
+                              child: CustomTextField(
+                                label: 'Curing Temp (°C)',
+                                controller: tempController,
+                                keyboardType: TextInputType.number,
+                                isRequired: true,
+                                prefixIcon: const Icon(Icons.thermostat),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: CustomTextField(
+                                label: 'Quantity Cured',
+                                controller: quantityController,
+                                keyboardType: TextInputType.number,
+                                isRequired: true,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+
+                        CustomTextField(
+                          label: 'Notes / Curing Remarks',
+                          hint: 'Curing pressure, time duration notes',
+                          controller: notesController,
+                          maxLines: 2,
+                        ),
+                        const SizedBox(height: 20),
+
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.coldChamber,
+                          ),
+                          onPressed: () async {
+                            final job = selectedJob;
+                            final chamber = selectedChamber;
+                            final operator = selectedOperator;
+                            if (job == null || chamber == null || operator == null) {
+                              ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                const SnackBar(
+                                    content:
+                                        Text('Please fill all required fields')),
+                              );
+                              return;
+                            }
+
+                            final qty =
+                                int.tryParse(quantityController.text.trim());
+                            if (qty == null || qty < 1 || qty > job.quantity) {
+                              ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                SnackBar(
+                                    content: Text(
+                                        'Quantity must be between 1 and ${job.quantity}')),
+                              );
+                              return;
+                            }
+
+                            final temp =
+                                double.tryParse(tempController.text.trim());
+                            if (temp == null || temp <= 0 || temp > 300) {
+                              ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Enter a valid curing temperature (°C)')),
+                              );
+                              return;
+                            }
+
+                            Navigator.pop(sheetContext);
+                            try {
+                              await ref
+                                  .read(coldChamberProvider.notifier)
+                                  .createChamberEntry(
+                                    jobId: job.id,
+                                    chamberName: chamber,
+                                    operatorName: operator,
+                                    quantity: qty,
+                                    temperature: temp,
+                                    notes: notesController.text.trim(),
+                                  );
+                              // The job moved to the next stage: refresh the job list.
+                              await ref.read(jobProvider.notifier).fetchJobs();
+
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                        'Cold curing completed & job moved to QC!'),
+                                    backgroundColor: AppColors.ready,
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Failed: $e'),
+                                    backgroundColor: AppColors.rejected,
+                                  ),
+                                );
+                              }
                             }
                           },
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 12),
-
-                    SearchableDropdown<String>(
-                      label: 'Cold Chamber Unit',
-                      value: selectedChamber,
-                      items: chambers,
-                      isRequired: true,
-                      itemAsString: (c) => c,
-                      onChanged: (val) => selectedChamber = val,
-                    ),
-                    const SizedBox(height: 12),
-
-                    SearchableDropdown<String>(
-                      label: 'Operator Name',
-                      value: selectedOperator,
-                      items: operators,
-                      isRequired: true,
-                      itemAsString: (op) => op,
-                      onChanged: (val) => selectedOperator = val,
-                    ),
-                    const SizedBox(height: 12),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: CustomTextField(
-                            label: 'Curing Temp (°C)',
-                            controller: tempController,
-                            keyboardType: TextInputType.number,
-                            isRequired: true,
-                            prefixIcon: const Icon(Icons.thermostat),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: CustomTextField(
-                            label: 'Quantity Cured',
-                            controller: quantityController,
-                            keyboardType: TextInputType.number,
-                            isRequired: true,
-                          ),
+                          child: const Text('Complete Curing Process'),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-
-                    CustomTextField(
-                      label: 'Notes / Curing Remarks',
-                      hint: 'Curing pressure, time duration notes',
-                      controller: notesController,
-                      maxLines: 2,
-                    ),
-                    const SizedBox(height: 20),
-
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.coldChamber,
-                      ),
-                      onPressed: () async {
-                        if (selectedJob == null ||
-                            selectedChamber == null ||
-                            selectedOperator == null) {
-                          ScaffoldMessenger.of(sheetContext).showSnackBar(
-                            const SnackBar(
-                                content: Text('Please fill all required fields')),
-                          );
-                          return;
-                        }
-
-                        Navigator.pop(sheetContext);
-                        try {
-                          await ref
-                              .read(coldChamberProvider.notifier)
-                              .createChamberEntry(
-                                jobId: selectedJob!.id,
-                                chamberName: selectedChamber!,
-                                operatorName: selectedOperator!,
-                                quantity: int.tryParse(
-                                        quantityController.text.trim()) ??
-                                    1,
-                                temperature: double.tryParse(
-                                        tempController.text.trim()) ??
-                                    115.0,
-                                notes: notesController.text.trim(),
-                              );
-
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                    'Cold curing completed & job moved to QC!'),
-                                backgroundColor: AppColors.ready,
-                              ),
-                            );
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Failed: $e'),
-                                backgroundColor: AppColors.rejected,
-                              ),
-                            );
-                          }
-                        }
-                      },
-                      child: const Text('Complete Curing Process'),
-                    ),
-                  ],
-                ),
-              ),
+                  ),
+                );
+              },
             );
           },
         );

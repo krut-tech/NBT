@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/services/storage_service.dart';
 import '../../../core/utils/date_formatter.dart';
+import '../../../core/utils/error_message.dart';
 import '../../../core/widgets/custom_text_field.dart';
 import '../../../core/widgets/searchable_dropdown.dart';
 import '../../customers/models/customer.dart';
@@ -59,6 +60,7 @@ class _JobFormScreenState extends ConsumerState<JobFormScreen> {
         ? await _storageService.pickImageFromCamera()
         : await _storageService.pickImageFromGallery();
 
+    if (!mounted) return;
     if (file != null) {
       setState(() {
         _selectedPhotos.add(file);
@@ -78,10 +80,16 @@ class _JobFormScreenState extends ConsumerState<JobFormScreen> {
       lastDate: DateTime(2030),
     );
 
+    if (!mounted) return;
     if (picked != null) {
       setState(() {
         if (isReceivedDate) {
           _receivedDate = picked;
+          // Keep "expected delivery" on or after the received date.
+          final expected = _expectedDeliveryDate;
+          if (expected != null && expected.isBefore(picked)) {
+            _expectedDeliveryDate = picked;
+          }
         } else {
           _expectedDeliveryDate = picked;
         }
@@ -109,6 +117,16 @@ class _JobFormScreenState extends ConsumerState<JobFormScreen> {
     if (_selectedBrand == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select brand')),
+      );
+      return;
+    }
+
+    final expected = _expectedDeliveryDate;
+    if (expected != null && expected.isBefore(_receivedDate)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content:
+                Text('Expected delivery cannot be before the received date')),
       );
       return;
     }
@@ -143,7 +161,7 @@ class _JobFormScreenState extends ConsumerState<JobFormScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to create job: $e'),
+            content: Text('Failed to create job: ${friendlyError(e)}'),
             backgroundColor: AppColors.rejected,
           ),
         );

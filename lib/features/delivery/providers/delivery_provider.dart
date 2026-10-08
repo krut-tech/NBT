@@ -39,7 +39,7 @@ class DeliveryNotifier extends StateNotifier<AsyncValue<List<Delivery>>> {
       final client = SupabaseService.client;
 
       // 1. Generate Delivery Number
-      final genRes = await client.rpc('generate_delivery_number').single();
+      final genRes = await client.rpc('generate_delivery_number');
       final deliveryNumber = genRes as String? ??
           'DEL-${DateTime.now().year}-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
 

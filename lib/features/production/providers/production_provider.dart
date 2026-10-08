@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/services/audit_service.dart';
+import '../../../core/services/job_status_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../models/production_entry.dart';
 
@@ -50,22 +51,14 @@ class ProductionNotifier extends StateNotifier<AsyncValue<List<ProductionEntry>>
         'created_by': SupabaseService.currentUserId,
       });
 
-      // 2. Advance Job Status to 'Cold Chamber'
-      await client
-          .from('jobs')
-          .update({'status': 'Cold Chamber', 'updated_at': DateTime.now().toIso8601String()})
-          .eq('id', jobId);
+      // 2. Advance Job Status to 'Cold Chamber' (+ history with the real previous status)
+      await JobStatusService.advance(
+        jobId: jobId,
+        newStatus: 'Cold Chamber',
+        remarks: 'Building complete. Moved to Cold Chamber.',
+      );
 
-      // 3. Record status history
-      await client.from('job_status_history').insert({
-        'job_id': jobId,
-        'previous_status': 'Production',
-        'new_status': 'Cold Chamber',
-        'changed_by': SupabaseService.currentUserId,
-        'remarks': 'Building complete. Moved to Cold Chamber.',
-      });
-
-      // 4. Audit Log
+      // 3. Audit Log
       await AuditService.logAction(
         action: 'PRODUCTION_COMPLETED',
         entityType: 'JOB',

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/services/audit_service.dart';
+import '../../../core/services/job_status_service.dart';
 import '../../../core/services/storage_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../models/job.dart';
@@ -99,8 +100,7 @@ class JobNotifier extends StateNotifier<AsyncValue<List<Job>>> {
       final client = SupabaseService.client;
 
       // 1. Generate Job Number using SQL function
-      final genRes =
-          await client.rpc('generate_job_number').single();
+      final genRes = await client.rpc('generate_job_number');
       final jobNumber = genRes as String? ??
           'NBT-${DateTime.now().year}-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
 
@@ -167,34 +167,22 @@ class JobNotifier extends StateNotifier<AsyncValue<List<Job>>> {
 
   Future<void> updateJobStatus({
     required String jobId,
-    required String currentStatus,
     required String newStatus,
     String? remarks,
   }) async {
     try {
-      final client = SupabaseService.client;
+      // Update status + record history (previous status is read from the DB)
+      final previousStatus = await JobStatusService.advance(
+        jobId: jobId,
+        newStatus: newStatus,
+        remarks: remarks,
+      );
 
-      // 1. Update status
-      await client
-          .from('jobs')
-          .update({'status': newStatus, 'updated_at': DateTime.now().toIso8601String()})
-          .eq('id', jobId);
-
-      // 2. Record status history
-      await client.from('job_status_history').insert({
-        'job_id': jobId,
-        'previous_status': currentStatus,
-        'new_status': newStatus,
-        'changed_by': SupabaseService.currentUserId,
-        'remarks': remarks ?? 'Status updated to $newStatus',
-      });
-
-      // 3. Audit Log
       await AuditService.logAction(
         action: 'UPDATE_JOB_STATUS',
         entityType: 'JOB',
         entityId: jobId,
-        details: {'from': currentStatus, 'to': newStatus, 'remarks': remarks},
+        details: {'from': previousStatus, 'to': newStatus, 'remarks': remarks},
       );
 
       await fetchJobs();
@@ -203,6 +191,32 @@ class JobNotifier extends StateNotifier<AsyncValue<List<Job>>> {
     }
   }
 }
+
+/// Jobs currently in any of [statuses] (comma separated, e.g. 'Approved,Production').
+/// Independent of the filters of the job list screen, so production / cold chamber /
+/// QC / delivery pickers always show the right jobs.
+final jobsByStatusProvider =
+    FutureProvider.autoDispose.family<List<Job>, String>((ref, statuses) async {
+  final response = await SupabaseService.client
+      .from('jobs')
+      .select('*, customers(*)')
+      .inFilter('status', statuses.split(','))
+      .order('created_at', ascending: true);
+
+  return (response as List).map((json) => Job.fromJson(json)).toList();
+});
+
+/// A single job by id, always fresh (used by the job detail screen).
+final jobByIdProvider =
+    FutureProvider.autoDispose.family<Job, String>((ref, jobId) async {
+  final response = await SupabaseService.client
+      .from('jobs')
+      .select('*, customers(*)')
+      .eq('id', jobId)
+      .single();
+
+  return Job.fromJson(response);
+});
 
 final jobProvider =
     StateNotifierProvider<JobNotifier, AsyncValue<List<Job>>>(

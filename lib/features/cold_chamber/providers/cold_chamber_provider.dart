@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/services/audit_service.dart';
+import '../../../core/services/job_status_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../models/cold_chamber_entry.dart';
 
@@ -50,22 +51,14 @@ class ColdChamberNotifier extends StateNotifier<AsyncValue<List<ColdChamberEntry
         'created_by': SupabaseService.currentUserId,
       });
 
-      // 2. Advance Job Status to 'QC'
-      await client
-          .from('jobs')
-          .update({'status': 'QC', 'updated_at': DateTime.now().toIso8601String()})
-          .eq('id', jobId);
+      // 2. Advance Job Status to 'QC' (+ history with the real previous status)
+      await JobStatusService.advance(
+        jobId: jobId,
+        newStatus: 'QC',
+        remarks: 'Cold curing complete ($temperature°C). Moved to QC.',
+      );
 
-      // 3. Record status history
-      await client.from('job_status_history').insert({
-        'job_id': jobId,
-        'previous_status': 'Cold Chamber',
-        'new_status': 'QC',
-        'changed_by': SupabaseService.currentUserId,
-        'remarks': 'Cold curing complete ($temperature°C). Moved to QC.',
-      });
-
-      // 4. Audit Log
+      // 3. Audit Log
       await AuditService.logAction(
         action: 'COLD_CHAMBER_COMPLETED',
         entityType: 'JOB',

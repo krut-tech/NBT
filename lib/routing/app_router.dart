@@ -1,6 +1,9 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../features/auth/providers/auth_provider.dart';
+import '../features/customers/providers/customer_provider.dart';
+import '../features/jobs/providers/job_provider.dart';
 import '../features/auth/views/login_screen.dart';
 import '../features/auth/views/register_screen.dart';
 import '../features/auth/views/splash_screen.dart';
@@ -33,18 +36,34 @@ import '../features/stock/views/stock_list_screen.dart';
 import '../features/stock/views/stock_transaction_screen.dart';
 import '../features/suppliers/views/supplier_list_screen.dart';
 
+/// Screens a customer account may open. Everything else is staff-only (the database
+/// enforces this with RLS as well; this just keeps customers out of empty/forbidden UIs).
+bool _customerMayOpen(String location) {
+  const exact = {'/dashboard', '/notifications', '/ledger', '/payments'};
+  if (exact.contains(location)) return true;
+  return location.startsWith('/jobs/') && location != '/jobs/new';
+}
+
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authProvider);
+  // The router must be created ONCE. Watching the auth state here would rebuild the
+  // whole GoRouter on every auth change, which resets navigation and throws away the
+  // login form (and its error message). Instead the router is told to re-run its
+  // redirect whenever the auth state changes.
+  final authChanged = ValueNotifier<int>(0);
+  ref.listen(authProvider, (_, __) => authChanged.value++);
 
-  return GoRouter(
+  final router = GoRouter(
     initialLocation: '/splash',
+    refreshListenable: authChanged,
     redirect: (context, state) {
+      final authState = ref.read(authProvider);
       final isLoading = authState.isLoading;
-      final user = authState.value;
+      final user = authState.valueOrNull;
 
-      final isSplash = state.matchedLocation == '/splash';
-      final isLoggingIn = state.matchedLocation == '/login';
-      final isRegistering = state.matchedLocation == '/register';
+      final location = state.matchedLocation;
+      final isSplash = location == '/splash';
+      final isLoggingIn = location == '/login';
+      final isRegistering = location == '/register';
 
       if (isLoading) {
         return isSplash ? null : '/splash';
@@ -56,7 +75,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       }
 
       // User logged in
-      if (isSplash || isLoggingIn) {
+      if (isSplash || isLoggingIn || isRegistering) {
+        return '/dashboard';
+      }
+
+      if (user.isCustomer && !_customerMayOpen(location)) {
         return '/dashboard';
       }
 
@@ -104,10 +127,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/customers/:id',
-        builder: (context, state) {
-          final customer = state.extra as Customer;
-          return CustomerDetailScreen(customer: customer);
-        },
+        builder: (context, state) => _CustomerRoute(
+          id: state.pathParameters['id']!,
+          customer: state.extra is Customer ? state.extra as Customer : null,
+        ),
       ),
 
       // Jobs
@@ -124,10 +147,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/jobs/:id',
-        builder: (context, state) {
-          final job = state.extra as Job;
-          return JobDetailScreen(job: job);
-        },
+        builder: (context, state) => _JobRoute(
+          id: state.pathParameters['id']!,
+          job: state.extra is Job ? state.extra as Job : null,
+        ),
       ),
       GoRoute(
         path: '/qr-scanner',
@@ -224,4 +247,71 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
+
+  ref.onDispose(() {
+    router.dispose();
+    authChanged.dispose();
+  });
+
+  return router;
 });
+
+/// Job detail that also works when the screen is opened without the `extra` object
+/// (page refresh on web, deep link): the job is then loaded by its id.
+class _JobRoute extends ConsumerWidget {
+  final String id;
+  final Job? job;
+
+  const _JobRoute({required this.id, this.job});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final known = job;
+    if (known != null) return JobDetailScreen(job: known);
+
+    return ref.watch(jobByIdProvider(id)).when(
+          loading: () => const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          ),
+          error: (_, __) => Scaffold(
+            appBar: AppBar(title: const Text('Job')),
+            body: const Center(child: Text('Job not found.')),
+          ),
+          data: (loaded) => JobDetailScreen(job: loaded),
+        );
+  }
+}
+
+/// Same idea for the customer detail screen.
+class _CustomerRoute extends ConsumerWidget {
+  final String id;
+  final Customer? customer;
+
+  const _CustomerRoute({required this.id, this.customer});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final known = customer;
+    if (known != null) return CustomerDetailScreen(customer: known);
+
+    return ref.watch(customerProvider).when(
+          loading: () => const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          ),
+          error: (e, _) => Scaffold(
+            appBar: AppBar(title: const Text('Customer')),
+            body: Center(child: Text('Could not load customer: $e')),
+          ),
+          data: (customers) {
+            final match = customers.where((c) => c.id == id).firstOrNull;
+            if (match == null) {
+              return Scaffold(
+                appBar: AppBar(title: const Text('Customer')),
+                body: const Center(child: Text('Customer not found.')),
+              );
+            }
+            return CustomerDetailScreen(customer: match);
+          },
+        );
+  }
+}

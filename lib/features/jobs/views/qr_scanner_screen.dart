@@ -3,7 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../core/constants/app_colors.dart';
-import '../providers/job_provider.dart';
+import '../../../core/services/supabase_service.dart';
+import '../models/job.dart';
 
 class QrScannerScreen extends ConsumerStatefulWidget {
   const QrScannerScreen({super.key});
@@ -15,39 +16,57 @@ class QrScannerScreen extends ConsumerStatefulWidget {
 class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
   bool _isProcessing = false;
 
-  void _onDetect(BarcodeCapture capture) async {
+  Future<void> _onDetect(BarcodeCapture capture) async {
     if (_isProcessing) return;
-    final List<Barcode> barcodes = capture.barcodes;
 
-    for (final barcode in barcodes) {
-      final code = barcode.rawValue;
-      if (code != null && code.trim().isNotEmpty) {
-        setState(() => _isProcessing = true);
-
-        // Search job by Job Number
-        await ref
-            .read(jobProvider.notifier)
-            .fetchJobs(search: code.trim());
-
-        final jobsAsync = ref.read(jobProvider);
-
-        jobsAsync.whenData((jobs) {
-          if (jobs.isNotEmpty) {
-            final job = jobs.first;
-            context.pushReplacement('/jobs/${job.id}', extra: job);
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('No job found matching "$code"'),
-                backgroundColor: AppColors.rejected,
-              ),
-            );
-            setState(() => _isProcessing = false);
-          }
-        });
+    String? code;
+    for (final barcode in capture.barcodes) {
+      final raw = barcode.rawValue?.trim();
+      if (raw != null && raw.isNotEmpty) {
+        code = raw;
         break;
       }
     }
+    if (code == null) return;
+
+    setState(() => _isProcessing = true);
+
+    try {
+      // Exact match on the job number (a "contains" search could open NBT-2026-0012
+      // when NBT-2026-001 is scanned) and independent of the job list filters.
+      final res = await SupabaseService.client
+          .from('jobs')
+          .select('*, customers(*)')
+          .eq('job_number', code)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      if (res != null) {
+        final job = Job.fromJson(res);
+        context.pushReplacement('/jobs/${job.id}', extra: job);
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No job found matching "$code"'),
+          backgroundColor: AppColors.rejected,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Scan failed: $e'),
+          backgroundColor: AppColors.rejected,
+        ),
+      );
+    }
+
+    // Short pause so the same code in front of the camera doesn't spam snackbars.
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) setState(() => _isProcessing = false);
   }
 
   @override

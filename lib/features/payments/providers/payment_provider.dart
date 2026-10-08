@@ -37,7 +37,7 @@ class PaymentNotifier extends StateNotifier<AsyncValue<List<Payment>>> {
       final client = SupabaseService.client;
 
       // 1. Generate Payment Receipt Number
-      final genRes = await client.rpc('generate_payment_number').single();
+      final genRes = await client.rpc('generate_payment_number');
       final receiptNumber = genRes as String? ??
           'PAY-${DateTime.now().year}-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
 

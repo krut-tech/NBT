@@ -38,36 +38,39 @@ class AuthRepository {
     );
   }
 
+  /// Self-registration. The database trigger `handle_new_user` creates the profile row
+  /// (always with role `customer`) from the metadata below. The client must never choose
+  /// a role: staff roles are assigned by an admin from the Staff screen afterwards.
   Future<AuthResponse> signUpWithEmailAndPassword({
     required String email,
     required String password,
     required String fullName,
-    required String role,
     String? phone,
-    String? customerId,
   }) async {
-    final response = await _client.auth.signUp(
+    return _client.auth.signUp(
       email: email,
       password: password,
       data: {
         'full_name': fullName,
-        'role': role,
+        if (phone != null && phone.isNotEmpty) 'phone': phone,
       },
     );
+  }
 
-    if (response.user != null) {
-      // Ensure profile row exists in 'profiles' table
-      await _client.from('profiles').upsert({
-        'id': response.user!.id,
-        'full_name': fullName,
-        'phone': phone,
-        'role': role,
-        'customer_id': customerId,
-        'is_active': true,
-      });
-    }
+  /// Admin / manager only (enforced by RLS): change the role of an existing profile.
+  Future<void> updateRole({required String userId, required String role}) async {
+    await _client.from('profiles').update({'role': role}).eq('id', userId);
+  }
 
-    return response;
+  /// Admin / manager only (enforced by RLS + a database trigger): link a customer
+  /// login to its customer record so the customer portal shows the right data.
+  Future<void> updateCustomerLink({
+    required String userId,
+    required String? customerId,
+  }) async {
+    await _client
+        .from('profiles')
+        .update({'customer_id': customerId}).eq('id', userId);
   }
 
   Future<void> signOut() async {

@@ -22,10 +22,12 @@ class QcScreen extends ConsumerWidget {
     bool airTest = true;
     bool finalInspection = true;
     String finalResult = 'PASS'; // PASS, FAIL, HOLD
-    String? selectedDefect = 'None';
+    String? selectedDefect;
     final remarksController = TextEditingController();
     final staffNameController = TextEditingController(text: 'QC Inspector');
 
+    // NOTE: inside the sheet use `sheetRef` / `sheetContext`; the outer `ref` and
+    // `context` (this screen) are used after the sheet is closed.
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -34,18 +36,23 @@ class QcScreen extends ConsumerWidget {
       ),
       builder: (sheetContext) {
         return Consumer(
-          builder: (context, ref, _) {
-            final jobsAsync = ref.watch(jobProvider);
-            final masterItemsAsync = ref.watch(masterDataProvider);
+          builder: (_, sheetRef, __) {
+            // 'Hold' jobs can be re-inspected once the issue is sorted out.
+            final jobsAsync =
+                sheetRef.watch(jobsByStatusProvider('QC,Cold Chamber,Hold'));
+            final masterItemsAsync = sheetRef.watch(masterDataProvider);
 
-            List<String> defectTypes = ['None', 'Porosity / Blister', 'Tread Separation', 'Sidewall Bulge', 'Bad Curing', 'Casing Damage'];
+            List<String> defectTypes = ['Porosity / Blister', 'Tread Separation', 'Sidewall Bulge', 'Bad Curing', 'Casing Damage'];
             masterItemsAsync.whenData((items) {
-              final list = items.where((i) => i.category == 'qc_defect_type').map((i) => i.name).toList();
+              final list = items
+                  .where((i) => i.category == 'qc_defect_type' && i.name != 'None')
+                  .map((i) => i.name)
+                  .toList();
               if (list.isNotEmpty) defectTypes = list;
             });
 
             return StatefulBuilder(
-              builder: (context, setState) {
+              builder: (_, setState) {
                 return Padding(
                   padding: EdgeInsets.only(
                     left: 20,
@@ -79,18 +86,14 @@ class QcScreen extends ConsumerWidget {
                         jobsAsync.when(
                           loading: () => const LinearProgressIndicator(),
                           error: (e, _) => Text('Error loading jobs: $e'),
-                          data: (jobs) {
-                            final eligibleJobs = jobs.where((j) =>
-                                j.status == 'QC' ||
-                                j.status == 'Cold Chamber').toList();
-
+                          data: (eligibleJobs) {
                             return SearchableDropdown<Job>(
                               label: 'Select Job for Quality Inspection',
                               value: selectedJob,
                               items: eligibleJobs,
                               isRequired: true,
                               itemAsString: (j) =>
-                                  '#${j.jobNumber} - ${j.customer?.name} (${j.quantity} Tyres)',
+                                  '#${j.jobNumber} - ${j.customer?.name ?? 'Unknown'} (${j.quantity} Tyres)',
                               onChanged: (val) => setState(() => selectedJob = val),
                             );
                           },
@@ -195,6 +198,7 @@ class QcScreen extends ConsumerWidget {
                             label: 'Defect Type',
                             value: selectedDefect,
                             items: defectTypes,
+                            isRequired: true,
                             itemAsString: (d) => d,
                             onChanged: (val) => setState(() => selectedDefect = val),
                           ),
@@ -225,7 +229,8 @@ class QcScreen extends ConsumerWidget {
                                     : AppColors.rejected),
                           ),
                           onPressed: () async {
-                            if (selectedJob == null) {
+                            final job = selectedJob;
+                            if (job == null) {
                               ScaffoldMessenger.of(sheetContext).showSnackBar(
                                 const SnackBar(
                                     content: Text('Please select a job')),
@@ -233,29 +238,66 @@ class QcScreen extends ConsumerWidget {
                               return;
                             }
 
+                            // A tyre cannot PASS with a failed checkpoint.
+                            if (finalResult == 'PASS' &&
+                                !(visualCheck &&
+                                    treadCheck &&
+                                    sidewallCheck &&
+                                    airTest)) {
+                              ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'All 4 checkpoints must be ticked to PASS. Choose HOLD or FAIL instead.')),
+                              );
+                              return;
+                            }
+
+                            // FAIL / HOLD need a reason.
+                            if (finalResult != 'PASS' && selectedDefect == null) {
+                              ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Select a defect type for a FAIL / HOLD result')),
+                              );
+                              return;
+                            }
+
+                            final staffName = staffNameController.text.trim();
+                            if (staffName.isEmpty) {
+                              ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                const SnackBar(
+                                    content: Text('Enter the inspector name')),
+                              );
+                              return;
+                            }
+
+                            final result = finalResult;
                             Navigator.pop(sheetContext);
                             try {
                               await ref
                                   .read(qcProvider.notifier)
                                   .createQcInspection(
-                                    jobId: selectedJob!.id,
+                                    jobId: job.id,
                                     visualCheck: visualCheck,
                                     treadCheck: treadCheck,
                                     sidewallCheck: sidewallCheck,
                                     airTest: airTest,
                                     finalInspection: finalInspection,
-                                    finalResult: finalResult,
-                                    defectType: selectedDefect,
+                                    finalResult: result,
+                                    defectType:
+                                        result == 'PASS' ? null : selectedDefect,
                                     remarks: remarksController.text.trim(),
-                                    qcStaffName: staffNameController.text.trim(),
+                                    qcStaffName: staffName,
                                   );
+                              // The job moved to the next stage: refresh the job list.
+                              await ref.read(jobProvider.notifier).fetchJobs();
 
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
                                     content: Text(
-                                        'QC Inspection recorded: $finalResult'),
-                                    backgroundColor: finalResult == 'PASS'
+                                        'QC Inspection recorded: $result'),
+                                    backgroundColor: result == 'PASS'
                                         ? AppColors.ready
                                         : AppColors.rejected,
                                   ),

@@ -39,7 +39,7 @@ class InvoiceNotifier extends StateNotifier<AsyncValue<List<Invoice>>> {
       final client = SupabaseService.client;
 
       // 1. Generate Invoice Number
-      final genRes = await client.rpc('generate_invoice_number').single();
+      final genRes = await client.rpc('generate_invoice_number');
       final invoiceNumber = genRes as String? ??
           'INV-${DateTime.now().year}-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
 

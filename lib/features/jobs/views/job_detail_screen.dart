@@ -15,7 +15,7 @@ class JobDetailScreen extends ConsumerWidget {
 
   const JobDetailScreen({super.key, required this.job});
 
-  void _showStatusUpdateDialog(BuildContext context, WidgetRef ref) {
+  void _showStatusUpdateDialog(BuildContext context, WidgetRef ref, Job job) {
     String selectedStatus = job.status;
     final TextEditingController remarksController = TextEditingController();
 
@@ -23,7 +23,7 @@ class JobDetailScreen extends ConsumerWidget {
       context: context,
       builder: (dialogContext) {
         return StatefulBuilder(
-          builder: (context, setState) {
+          builder: (_, setDialogState) {
             return AlertDialog(
               title: Text('Update Job #${job.jobNumber} Status'),
               content: Column(
@@ -42,7 +42,7 @@ class JobDetailScreen extends ConsumerWidget {
                             ))
                         .toList(),
                     onChanged: (val) {
-                      if (val != null) setState(() => selectedStatus = val);
+                      if (val != null) setDialogState(() => selectedStatus = val);
                     },
                     decoration: const InputDecoration(
                       contentPadding:
@@ -66,35 +66,41 @@ class JobDetailScreen extends ConsumerWidget {
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
-                  onPressed: () async {
-                    Navigator.pop(dialogContext);
-                    try {
-                      await ref.read(jobProvider.notifier).updateJobStatus(
-                            jobId: job.id,
-                            currentStatus: job.status,
-                            newStatus: selectedStatus,
-                            remarks: remarksController.text.trim(),
-                          );
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                                'Job status updated to $selectedStatus successfully!'),
-                            backgroundColor: AppColors.ready,
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Failed to update status: $e'),
-                            backgroundColor: AppColors.rejected,
-                          ),
-                        );
-                      }
-                    }
-                  },
+                  // Nothing to update while the current status is still selected.
+                  onPressed: selectedStatus == job.status
+                      ? null
+                      : () async {
+                          final newStatus = selectedStatus;
+                          Navigator.pop(dialogContext);
+                          try {
+                            await ref.read(jobProvider.notifier).updateJobStatus(
+                                  jobId: job.id,
+                                  newStatus: newStatus,
+                                  remarks: remarksController.text.trim(),
+                                );
+                            // Refresh this screen (job banner + history timeline).
+                            ref.invalidate(jobByIdProvider(job.id));
+                            ref.invalidate(jobHistoryProvider(job.id));
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                      'Job status updated to $newStatus successfully!'),
+                                  backgroundColor: AppColors.ready,
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Failed to update status: $e'),
+                                  backgroundColor: AppColors.rejected,
+                                ),
+                              );
+                            }
+                          }
+                        },
                   child: const Text('Update Status'),
                 ),
               ],
@@ -107,6 +113,9 @@ class JobDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // `this.job` is the snapshot the screen was opened with; always show the live row
+    // so the status banner / lifecycle bar update right after a status change.
+    final job = ref.watch(jobByIdProvider(this.job.id)).valueOrNull ?? this.job;
     final historyAsync = ref.watch(jobHistoryProvider(job.id));
 
     return Scaffold(
@@ -115,7 +124,7 @@ class JobDetailScreen extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.edit_attributes),
-            onPressed: () => _showStatusUpdateDialog(context, ref),
+            onPressed: () => _showStatusUpdateDialog(context, ref, job),
             tooltip: 'Update Status',
           ),
         ],
@@ -282,7 +291,7 @@ class JobDetailScreen extends ConsumerWidget {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.secondary,
                     ),
-                    onPressed: () => _showStatusUpdateDialog(context, ref),
+                    onPressed: () => _showStatusUpdateDialog(context, ref, job),
                     icon: const Icon(Icons.swap_horiz),
                     label: const Text('Update Status'),
                   ),

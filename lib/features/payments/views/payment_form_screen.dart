@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/utils/error_message.dart';
 import '../../../core/widgets/custom_text_field.dart';
 import '../../../core/widgets/searchable_dropdown.dart';
 import '../../customers/models/customer.dart';
 import '../../customers/providers/customer_provider.dart';
+import '../../dashboard/providers/dashboard_provider.dart';
 import '../../invoices/models/invoice.dart';
 import '../../invoices/providers/invoice_provider.dart';
 import '../../master_data/providers/master_data_provider.dart';
@@ -71,6 +73,17 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
       return;
     }
 
+    final invoice = _selectedInvoice;
+    if (invoice != null && amount > invoice.balanceAmount) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'Amount is more than the invoice balance (${CurrencyFormatter.format(invoice.balanceAmount)})'),
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -83,6 +96,11 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
             referenceNumber: _referenceController.text.trim(),
             notes: _notesController.text.trim(),
           );
+
+      // The payment changed the invoice balance, the ledger and the dashboard numbers.
+      ref.read(invoiceProvider.notifier).fetchInvoices();
+      ref.invalidate(customerSummaryProvider);
+      ref.invalidate(adminDashboardMetricsProvider);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -98,7 +116,7 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed: $e'),
+            content: Text('Failed: ${friendlyError(e)}'),
             backgroundColor: AppColors.rejected,
           ),
         );

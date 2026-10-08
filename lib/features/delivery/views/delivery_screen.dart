@@ -22,6 +22,8 @@ class DeliveryScreen extends ConsumerWidget {
     final notesController = TextEditingController();
     DateTime deliveryDate = DateTime.now();
 
+    // NOTE: inside the sheet use `sheetRef` / `sheetContext`; the outer `ref` and
+    // `context` (this screen) are used after the sheet is closed.
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -30,11 +32,23 @@ class DeliveryScreen extends ConsumerWidget {
       ),
       builder: (sheetContext) {
         return Consumer(
-          builder: (context, ref, _) {
-            final jobsAsync = ref.watch(jobProvider);
+          builder: (_, sheetRef, __) {
+            final jobsAsync = sheetRef.watch(jobsByStatusProvider('Ready'));
+            final deliveries =
+                sheetRef.watch(deliveryProvider).valueOrNull ?? const [];
+
+            // Tyres of a job that are still waiting to be delivered
+            // (job quantity minus everything already dispatched).
+            int remainingFor(Job j) {
+              final delivered = deliveries
+                  .where((d) => d.jobId == j.id)
+                  .fold<int>(0, (sum, d) => sum + d.deliveredQuantity);
+              final remaining = j.quantity - delivered;
+              return remaining > 0 ? remaining : 0;
+            }
 
             return StatefulBuilder(
-              builder: (context, setState) {
+              builder: (_, setSheetState) {
                 return Padding(
                   padding: EdgeInsets.only(
                     left: 20,
@@ -69,7 +83,7 @@ class DeliveryScreen extends ConsumerWidget {
                           error: (e, _) => Text('Error loading jobs: $e'),
                           data: (jobs) {
                             final readyJobs =
-                                jobs.where((j) => j.status == 'Ready').toList();
+                                jobs.where((j) => remainingFor(j) > 0).toList();
 
                             return SearchableDropdown<Job>(
                               label: 'Select Ready Job for Delivery',
@@ -77,13 +91,13 @@ class DeliveryScreen extends ConsumerWidget {
                               items: readyJobs,
                               isRequired: true,
                               itemAsString: (j) =>
-                                  '#${j.jobNumber} - ${j.customer?.name} (${j.quantity} Tyres Ready)',
+                                  '#${j.jobNumber} - ${j.customer?.name ?? 'Unknown'} (${remainingFor(j)} of ${j.quantity} Tyres Ready)',
                               onChanged: (val) {
                                 if (val != null) {
-                                  setState(() {
+                                  setSheetState(() {
                                     selectedJob = val;
                                     quantityController.text =
-                                        val.quantity.toString();
+                                        remainingFor(val).toString();
                                     vehicleController.text =
                                         val.vehicleNumber ?? '';
                                   });
@@ -139,7 +153,8 @@ class DeliveryScreen extends ConsumerWidget {
                             backgroundColor: AppColors.delivered,
                           ),
                           onPressed: () async {
-                            if (selectedJob == null) {
+                            final job = selectedJob;
+                            if (job == null) {
                               ScaffoldMessenger.of(sheetContext).showSnackBar(
                                 const SnackBar(
                                     content: Text('Please select a ready job')),
@@ -147,18 +162,35 @@ class DeliveryScreen extends ConsumerWidget {
                               return;
                             }
 
-                            final delQty = int.tryParse(
-                                    quantityController.text.trim()) ??
-                                1;
+                            final remaining = remainingFor(job);
+                            final delQty =
+                                int.tryParse(quantityController.text.trim());
+                            if (delQty == null || delQty < 1 || delQty > remaining) {
+                              ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                SnackBar(
+                                    content: Text(
+                                        'Quantity must be between 1 and $remaining')),
+                              );
+                              return;
+                            }
+
+                            if (receivedByController.text.trim().isEmpty) {
+                              ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Enter who received the tyres')),
+                              );
+                              return;
+                            }
 
                             Navigator.pop(sheetContext);
                             try {
                               await ref
                                   .read(deliveryProvider.notifier)
                                   .createDelivery(
-                                    customerId: selectedJob!.customerId,
-                                    jobId: selectedJob!.id,
-                                    readyQuantity: selectedJob!.quantity,
+                                    customerId: job.customerId,
+                                    jobId: job.id,
+                                    readyQuantity: remaining,
                                     deliveredQuantity: delQty,
                                     deliveryDate: deliveryDate,
                                     vehicleNumber:
@@ -168,6 +200,8 @@ class DeliveryScreen extends ConsumerWidget {
                                         receivedByController.text.trim(),
                                     notes: notesController.text.trim(),
                                   );
+                              // The job status may have changed: refresh the job list.
+                              await ref.read(jobProvider.notifier).fetchJobs();
 
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_constants.dart';
+import '../../../core/utils/error_message.dart';
 import '../../../core/widgets/custom_text_field.dart';
 import '../providers/auth_provider.dart';
 
@@ -40,12 +41,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     try {
       await ref.read(authProvider.notifier).signIn(
             email: _emailController.text.trim(),
-            password: _passwordController.text.trim(),
+            password: _passwordController.text,
           );
     } catch (e) {
-      setState(() {
-        _errorMessage = e.toString().replaceAll('Exception: ', '');
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = friendlyError(e);
+        });
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -53,11 +56,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         });
       }
     }
-  }
-
-  void _fillQuickCredentials(String email, String password) {
-    _emailController.text = email;
-    _passwordController.text = password;
   }
 
   @override
@@ -226,42 +224,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   TextButton(
                     onPressed: () => context.push('/register'),
-                    child: const Text('Register Staff/Customer'),
+                    child: const Text('Register as Customer'),
                   ),
                 ],
               ),
 
-              const SizedBox(height: 24),
-              // Quick Auto-fill for Testing/Staff Access
-              ExpansionTile(
-                title: const Text(
-                  'Quick Demo Credentials',
-                  style: TextStyle(fontSize: 13, color: AppColors.textSecondaryLight),
-                ),
-                children: [
-                  ListTile(
-                    dense: true,
-                    title: const Text('Admin Demo'),
-                    subtitle: const Text('admin@newbharat.com'),
-                    trailing: const Icon(Icons.copy, size: 18),
-                    onTap: () => _fillQuickCredentials('admin@newbharat.com', 'Admin@123456'),
-                  ),
-                  ListTile(
-                    dense: true,
-                    title: const Text('Production Staff Demo'),
-                    subtitle: const Text('production@newbharat.com'),
-                    trailing: const Icon(Icons.copy, size: 18),
-                    onTap: () => _fillQuickCredentials('production@newbharat.com', 'Staff@123456'),
-                  ),
-                  ListTile(
-                    dense: true,
-                    title: const Text('Customer Demo'),
-                    subtitle: const Text('customer@newbharat.com'),
-                    trailing: const Icon(Icons.copy, size: 18),
-                    onTap: () => _fillQuickCredentials('customer@newbharat.com', 'Customer@123456'),
-                  ),
-                ],
-              ),
             ],
           ),
         ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -19,12 +20,26 @@ class JobListScreen extends ConsumerStatefulWidget {
 
 class _JobListScreenState extends ConsumerState<JobListScreen> {
   final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
   String _selectedStatus = 'All';
 
   final List<String> _statusFilters = ['All', ...AppConstants.tyreStatuses];
 
   @override
+  void initState() {
+    super.initState();
+    // The provider is shared with other screens (QR scanner, pickers...). Start from
+    // a clean filter so what the screen shows ('All', empty search) is what is loaded.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(jobProvider.notifier).fetchJobs(search: '', status: 'All');
+      }
+    });
+  }
+
+  @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -70,7 +85,9 @@ class _JobListScreenState extends ConsumerState<JobListScreen> {
                     ? IconButton(
                         icon: const Icon(Icons.clear),
                         onPressed: () {
+                          _searchDebounce?.cancel();
                           _searchController.clear();
+                          setState(() {});
                           ref
                               .read(jobProvider.notifier)
                               .fetchJobs(search: '');
@@ -79,7 +96,15 @@ class _JobListScreenState extends ConsumerState<JobListScreen> {
                     : null,
               ),
               onChanged: (val) {
-                ref.read(jobProvider.notifier).fetchJobs(search: val);
+                setState(() {}); // shows / hides the clear button
+                _searchDebounce?.cancel();
+                _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+                  if (mounted) {
+                    ref
+                        .read(jobProvider.notifier)
+                        .fetchJobs(search: val.trim());
+                  }
+                });
               },
             ),
           ),

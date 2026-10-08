@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/services/audit_service.dart';
+import '../../../core/services/job_status_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../models/qc_inspection.dart';
 
@@ -63,22 +64,14 @@ class QcNotifier extends StateNotifier<AsyncValue<List<QcInspection>>> {
         newJobStatus = 'Hold';
       }
 
-      // 3. Update Job Status
-      await client
-          .from('jobs')
-          .update({'status': newJobStatus, 'updated_at': DateTime.now().toIso8601String()})
-          .eq('id', jobId);
+      // 3. Update Job Status (+ history with the real previous status)
+      await JobStatusService.advance(
+        jobId: jobId,
+        newStatus: newJobStatus,
+        remarks: 'QC Inspection: $finalResult. ${remarks ?? ''}'.trim(),
+      );
 
-      // 4. Record History
-      await client.from('job_status_history').insert({
-        'job_id': jobId,
-        'previous_status': 'QC',
-        'new_status': newJobStatus,
-        'changed_by': SupabaseService.currentUserId,
-        'remarks': 'QC Inspection: $finalResult. ${remarks ?? ''}',
-      });
-
-      // 5. Audit Log
+      // 4. Audit Log
       await AuditService.logAction(
         action: 'QC_INSPECTION',
         entityType: 'JOB',

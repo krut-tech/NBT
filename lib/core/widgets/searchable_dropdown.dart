@@ -53,7 +53,11 @@ class SearchableDropdown<T> extends StatelessWidget {
         ? itemAsString(selectedVal)
         : (hint ?? 'Select $label');
 
+    // FormField only reads `initialValue` once. Keying it on the selected value makes
+    // it pick up the new selection, so `Form.validate()` sees what the user chose
+    // (otherwise required dropdowns could never pass validation).
     return FormField<T>(
+      key: ValueKey<T?>(value),
       initialValue: value,
       validator: validator ??
           (val) {
